@@ -33,10 +33,20 @@ def validate_api_key():
 
 
 def get_sql_connection():
-    if not SQL_CONNECTION_STRING:
-        raise RuntimeError("Missing required environment variable: AZURE_SQL_CONNECTION_STRING")
-    return pymssql.connect(SQL_CONNECTION_STRING)
-
+    server = os.getenv("SQL_SERVER")
+    user = os.getenv("SQL_USER") 
+    password = os.getenv("SQL_PASSWORD")
+    database = os.getenv("SQL_DATABASE")
+    
+    if not all([server, user, password, database]):
+        raise RuntimeError("Missing one or more SQL environment variables")
+    
+    return pymssql.connect(
+        server=server,
+        user=user,
+        password=password,
+        database=database
+    )
 
 @app.route('/api/v1/metrics', methods=['POST'])
 def add_metric():
