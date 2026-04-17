@@ -102,24 +102,29 @@ def get_metrics():
 def health_check():
     start_time = app.config.get('START_TIME')
     uptime_seconds = int((datetime.now() - start_time).total_seconds()) if start_time else 0
-    test_db_connection = False
+    db_status = False
+    db_error = None
 
     try:
-        with get_sql_connection() as connection:
-            test_db_connection = True
+        conn = pymssql.connect(
+            server=os.getenv("SQL_SERVER"),
+            user=os.getenv("SQL_USER"),
+            password=os.getenv("SQL_PASSWORD"),
+            database=os.getenv("SQL_DATABASE"),
+            login_timeout=5,  # 5 second timeout
+            timeout=5
+        )
+        conn.close()
+        db_status = True
     except Exception as e:
-        return jsonify({
-            "status": "unhealthy",
-            "uptime_seconds": uptime_seconds,
-            "db_connection": False,
-            "error": str(e)
-        }), 500
+        db_error = str(e)
 
     return jsonify({
-        "status": "healthy",
+        "status": "healthy" if db_status else "degraded",
         "uptime_seconds": uptime_seconds,
-        "db_connection": test_db_connection
-    }), 200
+        "db_connection": db_status,
+        "db_error": db_error
+    }), 200 
 
 
 if __name__ == '__main__':
