@@ -1,7 +1,7 @@
 from flask import Flask, jsonify, request
 import os
 from datetime import datetime
-import pyodbc
+import pymssql
 
 
 def env_or_fallback(primary_name, fallback_name=None):
@@ -35,9 +35,7 @@ def validate_api_key():
 def get_sql_connection():
     if not SQL_CONNECTION_STRING:
         raise RuntimeError("Missing required environment variable: AZURE_SQL_CONNECTION_STRING")
-    
-    connection_string = f"Driver={{ODBC Driver 17 for SQL Server}};{SQL_CONNECTION_STRING}"
-    return pyodbc.connect(connection_string)
+    return pymssql.connect(SQL_CONNECTION_STRING)
 
 
 @app.route('/api/v1/metrics', methods=['POST'])
