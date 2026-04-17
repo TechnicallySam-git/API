@@ -1,9 +1,7 @@
 from flask import Flask, jsonify, request
 import os
 from datetime import datetime
-import mysql.connector
-
-mysql_connector = mysql.connector
+import pyodbc
 
 
 def env_or_fallback(primary_name, fallback_name=None):
@@ -15,11 +13,7 @@ def env_or_fallback(primary_name, fallback_name=None):
     return None
 
 
-MYSQL_HOST = env_or_fallback("AZURE_MYSQL_HOST", "MYSQLCONNSTR_AZURE_MYSQL_HOST")
-MYSQL_USER = env_or_fallback("AZURE_MYSQL_USER", "MYSQLCONNSTR_AZURE_MYSQL_USER")
-MYSQL_PASSWORD = env_or_fallback("AZURE_MYSQL_PASSWORD", "MYSQLCONNSTR_AZURE_MYSQL_PASSWORD")
-MYSQL_DATABASE = env_or_fallback("AZURE_DATABASE_NAME", "MYSQLCONNSTR_AZURE_DATABASE_NAME")
-MYSQL_PORT = int(env_or_fallback("AZURE_MYSQL_PORT", "MYSQLCONNSTR_AZURE_MYSQL_PORT") or "3306")
+SQL_CONNECTION_STRING = env_or_fallback("AZURE_SQL_CONNECTION_STRING", "SQLCONNSTR_AZURE_SQL_CONNECTION_STRING")
 VALID_API_KEYS = {
     key.strip() for key in os.getenv("AZURE_API_KEYS", "").split(",") if key.strip()
 }
@@ -38,23 +32,12 @@ def validate_api_key():
     return bool(api_key) and api_key in VALID_API_KEYS
 
 
-def get_mysql_connection():
-    if not all([MYSQL_HOST, MYSQL_USER, MYSQL_PASSWORD, MYSQL_DATABASE]):
-        missing = [name for name, value in {
-            "AZURE_MYSQL_HOST": MYSQL_HOST,
-            "AZURE_MYSQL_USER": MYSQL_USER,
-            "AZURE_MYSQL_PASSWORD": MYSQL_PASSWORD,
-            "AZURE_DATABASE_NAME": MYSQL_DATABASE,
-        }.items() if not value]
-        raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
-
-    return mysql.connector.connect(
-        host=MYSQL_HOST,
-        port=MYSQL_PORT,
-        user=MYSQL_USER,
-        password=MYSQL_PASSWORD,
-        database=MYSQL_DATABASE,
-    )
+def get_sql_connection():
+    if not SQL_CONNECTION_STRING:
+        raise RuntimeError("Missing required environment variable: AZURE_SQL_CONNECTION_STRING")
+    
+    connection_string = f"Driver={{ODBC Driver 17 for SQL Server}};{SQL_CONNECTION_STRING}"
+    return pyodbc.connect(connection_string)
 
 
 @app.route('/api/v1/metrics', methods=['POST'])
@@ -62,18 +45,15 @@ def add_metric():
     if not validate_api_key():
         return jsonify({"error": "Invalid or missing API key"}), 401
 
-    if mysql_connector is None:
-        return jsonify({"error": "mysql-connector-python is not installed"}), 500
-
     data = request.get_json()
     host = data.get('host')
     cpu_usage = data.get('cpu_usage')
     memory_usage = data.get('memory_usage')
 
     try:
-        with get_mysql_connection() as connection:
+        with get_sql_connection() as connection:
             cursor = connection.cursor()
-            query = "INSERT INTO metrics (host, cpu_usage, memory_usage) VALUES (%s, %s, %s)"
+            query = "INSERT INTO metrics (host, cpu_usage, memory_usage) VALUES (?, ?, ?)"
             cursor.execute(query, (host, cpu_usage, memory_usage))
             connection.commit()
             return jsonify({"message": "Metric added successfully"}), 201
@@ -85,28 +65,26 @@ def add_metric():
 
 @app.route('/api/v1/metrics', methods=['GET'])
 def get_metrics():
-    start_date = request.args.get('start_date')
-    end_date = request.args.get('end_date')
-    host = request.args.get('host')
     if not validate_api_key():
         return jsonify({"error": "Invalid or missing API key"}), 401
 
-    if mysql_connector is None:
-        return jsonify({"error": "mysql-connector-python is not installed"}), 500
+    start_date = request.args.get('start_date')
+    end_date = request.args.get('end_date')
+    host = request.args.get('host')
 
     try:
-        with get_mysql_connection() as connection:
-            cursor = connection.cursor(dictionary=True)
-            query = "SELECT * FROM metrics WHERE timestamp BETWEEN %s AND %s"
-            params = (start_date, end_date)
+        with get_sql_connection() as connection:
+            cursor = connection.cursor()
+            query = "SELECT * FROM metrics WHERE timestamp BETWEEN ? AND ?"
+            params = [start_date, end_date]
 
             if host:
-                query += " AND host = %s"
-                params += (host,)
+                query += " AND host = ?"
+                params.append(host)
 
             cursor.execute(query, params)
             results = cursor.fetchall()
-            return jsonify(results), 200
+            return jsonify([dict(row) for row in results]), 200
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -118,16 +96,8 @@ def health_check():
     uptime_seconds = int((datetime.now() - start_time).total_seconds()) if start_time else 0
     test_db_connection = False
 
-    if mysql_connector is None:
-        return jsonify({
-            "status": "degraded",
-            "uptime_seconds": uptime_seconds,
-            "db_connection": False,
-            "error": "mysql-connector-python is not installed"
-        }), 200
-
     try:
-        with get_mysql_connection() as connection:
+        with get_sql_connection() as connection:
             test_db_connection = True
     except Exception as e:
         return jsonify({
