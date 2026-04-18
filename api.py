@@ -22,11 +22,6 @@ app = Flask(__name__)
 app.config['START_TIME'] = datetime.now()
 
 
-
-
-#All endpoints except /api/v1/health require a valid API key passed in the request header. 
-# Keys are stored in Azure App Service environment variables and never hard-coded in scripts.
-
 def validate_api_key():
     api_key = request.headers.get('X-API-Key')
     return bool(api_key) and api_key in VALID_API_KEYS
@@ -34,19 +29,20 @@ def validate_api_key():
 
 def get_sql_connection():
     server = os.getenv("SQL_SERVER")
-    user = os.getenv("SQL_USER") 
+    user = os.getenv("SQL_USER")
     password = os.getenv("SQL_PASSWORD")
     database = os.getenv("SQL_DATABASE")
-    
+
     if not all([server, user, password, database]):
         raise RuntimeError("Missing one or more SQL environment variables")
-    
+
     return pymssql.connect(
         server=server,
         user=user,
         password=password,
         database=database
     )
+
 
 @app.route('/api/v1/metrics', methods=['POST'])
 def add_metric():
@@ -55,20 +51,28 @@ def add_metric():
 
     data = request.get_json()
     host = data.get('host')
+    ip = data.get('ip')
     cpu_usage = data.get('cpu_usage')
-    memory_usage = data.get('memory_usage')
+    mem_used_mb = data.get('mem_used_mb')
+    disk_free_gb = data.get('disk_free_gb')
+    timestamp = data.get('timestamp')
+
+    if not all([host, ip, cpu_usage is not None, mem_used_mb is not None, disk_free_gb is not None, timestamp]):
+        return jsonify({"error": "Missing required fields"}), 400
 
     try:
         with get_sql_connection() as connection:
             cursor = connection.cursor()
-            query = "INSERT INTO metrics (host, cpu_usage, memory_usage) VALUES (?, ?, ?)"
-            cursor.execute(query, (host, cpu_usage, memory_usage))
+            query = """
+                INSERT INTO server_metrics (host, ip, cpu_usage, mem_used_mb, disk_free_gb, timestamp)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """
+            cursor.execute(query, (host, ip, cpu_usage, mem_used_mb, disk_free_gb, timestamp))
             connection.commit()
             return jsonify({"message": "Metric added successfully"}), 201
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-    
 
 
 @app.route('/api/v1/metrics', methods=['GET'])
@@ -80,19 +84,22 @@ def get_metrics():
     end_date = request.args.get('end_date')
     host = request.args.get('host')
 
+    if not start_date or not end_date:
+        return jsonify({"error": "start_date and end_date are required"}), 400
+
     try:
         with get_sql_connection() as connection:
-            cursor = connection.cursor()
-            query = "SELECT * FROM metrics WHERE timestamp BETWEEN ? AND ?"
+            cursor = connection.cursor(as_dict=True)
+            query = "SELECT * FROM server_metrics WHERE timestamp BETWEEN %s AND %s"
             params = [start_date, end_date]
 
             if host:
-                query += " AND host = ?"
+                query += " AND host = %s"
                 params.append(host)
 
             cursor.execute(query, params)
             results = cursor.fetchall()
-            return jsonify([dict(row) for row in results]), 200
+            return jsonify(results), 200
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -111,7 +118,7 @@ def health_check():
             user=os.getenv("SQL_USER"),
             password=os.getenv("SQL_PASSWORD"),
             database=os.getenv("SQL_DATABASE"),
-            login_timeout=5,  # 5 second timeout
+            login_timeout=5,
             timeout=5
         )
         conn.close()
@@ -124,9 +131,8 @@ def health_check():
         "uptime_seconds": uptime_seconds,
         "db_connection": db_status,
         "db_error": db_error
-    }), 200 
+    }), 200
 
 
 if __name__ == '__main__':
-    # Run locally when launched with: python api.py
     app.run(host='0.0.0.0', port=5000, debug=True)
