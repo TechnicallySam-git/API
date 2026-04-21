@@ -1,6 +1,6 @@
 from flask import Flask, jsonify, request
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 import pymssql
 
 
@@ -47,18 +47,29 @@ def get_sql_connection():
 @app.route('/api/v1/metrics', methods=['POST'])
 def add_metric():
     if not validate_api_key():
-        return jsonify({"error": "Invalid or missing API key"}), 401
+        return jsonify({"status": "error", "message": "Unauthorized. Valid X-API-Key required."}), 401
 
     data = request.get_json()
     host = data.get('host')
     ip = data.get('ip')
-    cpu_usage = data.get('cpu_usage')
-    mem_used_mb = data.get('mem_used_mb')
-    disk_free_gb = data.get('disk_free_gb')
+    metrics = data.get('metrics', {})  #
+    cpu_usage = metrics.get('cpu_usage')
+    mem_used_mb = metrics.get('mem_used_mb')
+    disk_free_gb = metrics.get('disk_free_gb')
     timestamp = data.get('timestamp')
 
-    if not all([host, ip, cpu_usage is not None, mem_used_mb is not None, disk_free_gb is not None, timestamp]):
-        return jsonify({"error": "Missing required fields"}), 400
+    if not host:
+        return jsonify({"status": "error", "message": "Missing required field: host"}), 400
+    if not ip:
+        return jsonify({"status": "error", "message": "Missing required field: ip"}), 400
+    if cpu_usage is None:
+        return jsonify({"status": "error", "message": "Missing required field: cpu_usage"}), 400
+    if mem_used_mb is None:
+        return jsonify({"status": "error", "message": "Missing required field: mem_used_mb"}), 400
+    if disk_free_gb is None:
+        return jsonify({"status": "error", "message": "Missing required field: disk_free_gb"}), 400
+    if not timestamp:
+        return jsonify({"status": "error", "message": "Missing required field: timestamp"}), 400
 
     try:
         with get_sql_connection() as connection:
@@ -69,46 +80,68 @@ def add_metric():
             """
             cursor.execute(query, (host, ip, cpu_usage, mem_used_mb, disk_free_gb, timestamp))
             connection.commit()
-            return jsonify({"message": "Metric added successfully"}), 201
+            return jsonify({
+                "status": "success",
+                "message": "Metrics recorded successfully.",
+                "host": host,
+                "timestamp": timestamp
+            }), 201
 
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 @app.route('/api/v1/metrics', methods=['GET'])
 def get_metrics():
     if not validate_api_key():
-        return jsonify({"error": "Invalid or missing API key"}), 401
+        return jsonify({"status": "error", "message": "Unauthorized. Valid X-API-Key required."}), 401
 
-    start_date = request.args.get('start_date')
-    end_date = request.args.get('end_date')
+    
+    from_date = request.args.get('from')
+    to_date = request.args.get('to')
     host = request.args.get('host')
+    limit = request.args.get('limit', 100, type=int)
 
-    if not start_date or not end_date:
-        return jsonify({"error": "start_date and end_date are required"}), 400
+    if limit > 1000:
+        limit = 1000
 
     try:
         with get_sql_connection() as connection:
             cursor = connection.cursor(as_dict=True)
-            query = "SELECT * FROM server_metrics WHERE timestamp BETWEEN %s AND %s"
-            params = [start_date, end_date]
+
+            if from_date and to_date:
+                query = "SELECT TOP (%s) * FROM server_metrics WHERE timestamp BETWEEN %s AND %s"
+                params = [limit, from_date, to_date]
+            else:
+                query = "SELECT TOP (%s) * FROM server_metrics"
+                params = [limit]
 
             if host:
-                query += " AND host = %s"
+                if from_date and to_date:
+                    query += " AND host = %s"
+                else:
+                    query += " WHERE host = %s"
                 params.append(host)
 
+            query += " ORDER BY timestamp DESC"
             cursor.execute(query, params)
             results = cursor.fetchall()
-            return jsonify(results), 200
+
+            if not results:
+                return jsonify({"status": "error", "message": "No records match the filter."}), 404
+
+            return jsonify({
+                "status": "success",
+                "count": len(results),
+                "results": results
+            }), 200
 
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 @app.route('/api/v1/health', methods=['GET'])
 def health_check():
-    start_time = app.config.get('START_TIME')
-    uptime_seconds = int((datetime.now() - start_time).total_seconds()) if start_time else 0
     db_status = False
     db_error = None
 
@@ -126,11 +159,12 @@ def health_check():
     except Exception as e:
         db_error = str(e)
 
+    
     return jsonify({
         "status": "healthy" if db_status else "degraded",
-        "uptime_seconds": uptime_seconds,
-        "db_connection": db_status,
-        "db_error": db_error
+        "api": "online",
+        "database": "connected" if db_status else "unreachable",
+        "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     }), 200
 
 
