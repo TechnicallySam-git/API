@@ -2,7 +2,7 @@
 # More GitHub Actions for Azure: https://github.com/Azure/actions
 # More info on Python, GitHub Actions, and Azure App Service: https://aka.ms/python-webapps-actions
 
-name: Build and deploy Python app to Azure Web App - knw-api
+name: Build and deploy Python app to Azure Web App - knw-app-mon
 
 on:
   push:
@@ -63,14 +63,14 @@ jobs:
       - name: Login to Azure
         uses: azure/login@v2
         with:
-          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_44CB0B8050C8410A9D68A1F68FEA256B }}
-          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_B0C3E5253FA64BD9AA185DB37834D053 }}
-          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_DA06BCA556114D2585D86889EF2E0476 }}
+          client-id: ${{ secrets.__clientidsecretname__ }}
+          tenant-id: ${{ secrets.__tenantidsecretname__ }}
+          subscription-id: ${{ secrets.__subscriptionidsecretname__ }}
 
       - name: 'Deploy to Azure Web App'
         uses: azure/webapps-deploy@v3
         id: deploy-to-webapp
         with:
-          app-name: 'knw-api'
+          app-name: 'knw-app-mon'
           slot-name: 'Production'
           
