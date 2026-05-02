@@ -170,7 +170,7 @@ def health_check():
     """
     Health check endpoint for Azure App Service monitoring.
     Attempts a test connection to the SQL database.
-    Returns 200 with status 'healthy' if the database is reachable, 500 with status 'degraded' if not.
+    Returns 200 in all cases with status 'healthy' if DB is reachable, or 'degraded' if not.
     Does not require authentication.
     """
     db_status = False
@@ -190,14 +190,12 @@ def health_check():
     except Exception as e:
         db_error = str(e)
 
-    status_code = 200 if db_status else 500
-
     return jsonify({
         "status": "healthy" if db_status else "degraded",
         "api": "online",
         "database": "connected" if db_status else "unreachable",
         "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    }), status_code
+    }), 200
 
 
 if __name__ == '__main__':
