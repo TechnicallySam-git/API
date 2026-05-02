@@ -1,7 +1,6 @@
 from flask import Flask, jsonify, request
 import os
 from datetime import datetime, timezone
-import pymssql
 
 
 def env_or_fallback(primary_name, fallback_name=None):
@@ -28,6 +27,9 @@ def validate_api_key():
 
 
 def get_sql_connection():
+    # Import here to avoid requiring pymssql at module import time
+    import pymssql
+
     server = os.getenv("SQL_SERVER")
     user = os.getenv("SQL_USER")
     password = os.getenv("SQL_PASSWORD")
@@ -146,6 +148,8 @@ def health_check():
     db_error = None
 
     try:
+        import pymssql
+
         conn = pymssql.connect(
             server=os.getenv("SQL_SERVER"),
             user=os.getenv("SQL_USER"),
