@@ -1,9 +1,15 @@
 from flask import Flask, jsonify, request
 import os
 from datetime import datetime, timezone
+import pymssql
 
 
 def env_or_fallback(primary_name, fallback_name=None):
+    """
+    Retrieves an environment variable by name, with an optional fallback.
+    Returns the value of the primary variable if set, otherwise the fallback.
+    Returns None if neither is set.
+    """
     value = os.getenv(primary_name)
     if value:
         return value
@@ -22,14 +28,20 @@ app.config['START_TIME'] = datetime.now()
 
 
 def validate_api_key():
+    """
+    Validates the API key provided in the X-API-Key request header.
+    Returns True if the key is present and matches a known valid key, False otherwise.
+    """
     api_key = request.headers.get('X-API-Key')
     return bool(api_key) and api_key in VALID_API_KEYS
 
 
 def get_sql_connection():
-    # Import here to avoid requiring pymssql at module import time
-    import pymssql
-
+    """
+    Creates and returns a pymssql connection using environment variables.
+    Raises RuntimeError if any required environment variable is missing.
+    Required variables: SQL_SERVER, SQL_USER, SQL_PASSWORD, SQL_DATABASE.
+    """
     server = os.getenv("SQL_SERVER")
     user = os.getenv("SQL_USER")
     password = os.getenv("SQL_PASSWORD")
@@ -48,13 +60,19 @@ def get_sql_connection():
 
 @app.route('/api/v1/metrics', methods=['POST'])
 def add_metric():
+    """
+    Accepts a JSON POST request containing server metrics and stores them in the database.
+    Requires a valid X-API-Key header.
+    Expected JSON fields: host, ip, metrics (cpu_usage, mem_used_mb, disk_free_gb), timestamp.
+    Returns 201 on success, 400 for missing fields, 401 for unauthorized, 500 for server errors.
+    """
     if not validate_api_key():
         return jsonify({"status": "error", "message": "Unauthorized. Valid X-API-Key required."}), 401
 
     data = request.get_json()
     host = data.get('host')
     ip = data.get('ip')
-    metrics = data.get('metrics', {})  #
+    metrics = data.get('metrics', {})
     cpu_usage = metrics.get('cpu_usage')
     mem_used_mb = metrics.get('mem_used_mb')
     disk_free_gb = metrics.get('disk_free_gb')
@@ -95,10 +113,15 @@ def add_metric():
 
 @app.route('/api/v1/metrics', methods=['GET'])
 def get_metrics():
+    """
+    Retrieves server metrics from the database with optional filtering.
+    Requires a valid X-API-Key header.
+    Optional query parameters: from (start timestamp), to (end timestamp), host (filter by host), limit (max records, default 100, max 1000).
+    Returns 200 with results, 404 if no records match, 401 for unauthorized, 500 for server errors.
+    """
     if not validate_api_key():
         return jsonify({"status": "error", "message": "Unauthorized. Valid X-API-Key required."}), 401
 
-    
     from_date = request.args.get('from')
     to_date = request.args.get('to')
     host = request.args.get('host')
@@ -144,12 +167,16 @@ def get_metrics():
 
 @app.route('/api/v1/health', methods=['GET'])
 def health_check():
+    """
+    Health check endpoint for Azure App Service monitoring.
+    Attempts a test connection to the SQL database.
+    Returns 200 with status 'healthy' if the database is reachable, 500 with status 'degraded' if not.
+    Does not require authentication.
+    """
     db_status = False
     db_error = None
 
     try:
-        import pymssql
-
         conn = pymssql.connect(
             server=os.getenv("SQL_SERVER"),
             user=os.getenv("SQL_USER"),
@@ -163,13 +190,14 @@ def health_check():
     except Exception as e:
         db_error = str(e)
 
-    
+    status_code = 200 if db_status else 500
+
     return jsonify({
         "status": "healthy" if db_status else "degraded",
         "api": "online",
         "database": "connected" if db_status else "unreachable",
         "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    }), 200
+    }), status_code
 
 
 if __name__ == '__main__':
