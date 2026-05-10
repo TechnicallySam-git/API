@@ -63,7 +63,8 @@ def add_metric():
     """
     Accepts a JSON POST request containing server metrics and stores them in the database.
     Requires a valid X-API-Key header.
-    Expected JSON fields: host, ip, metrics (cpu_usage, mem_used_mb, disk_free_gb), timestamp.
+    Expected JSON fields: host, ip, metrics (cpu_usage, mem_used_mb, disk_free_gb).
+    Timestamp is generated server-side to ensure accuracy.
     Returns 201 on success, 400 for missing fields, 401 for unauthorized, 500 for server errors.
     """
     if not validate_api_key():
@@ -76,7 +77,7 @@ def add_metric():
     cpu_usage = metrics.get('cpu_usage')
     mem_used_mb = metrics.get('mem_used_mb')
     disk_free_gb = metrics.get('disk_free_gb')
-    timestamp = data.get("%Y-%m-%dT%H:%M:%SZ")
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
     if not host:
         return jsonify({"status": "error", "message": "Missing required field: host"}), 400
@@ -88,8 +89,6 @@ def add_metric():
         return jsonify({"status": "error", "message": "Missing required field: mem_used_mb"}), 400
     if disk_free_gb is None:
         return jsonify({"status": "error", "message": "Missing required field: disk_free_gb"}), 400
-    if not timestamp:
-        return jsonify({"status": "error", "message": "Missing required field: timestamp"}), 400
 
     try:
         with get_sql_connection() as connection:

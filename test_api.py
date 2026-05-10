@@ -1,5 +1,6 @@
 import unittest
 from unittest.mock import patch, MagicMock
+from datetime import datetime, timezone, timedelta
 import os
 import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -50,8 +51,7 @@ class TestAPI(unittest.TestCase):
             '/api/v1/metrics',
             json={
                 "ip": "10.0.0.1",
-                "metrics": {"cpu_usage": 10.0, "mem_used_mb": 512.0, "disk_free_gb": 20.0},
-                "timestamp": "2026-05-02 12:00:00"
+                "metrics": {"cpu_usage": 10.0, "mem_used_mb": 512.0, "disk_free_gb": 20.0}
             },
             headers={"X-API-Key": "test-key"}
         )
@@ -63,20 +63,6 @@ class TestAPI(unittest.TestCase):
             '/api/v1/metrics',
             json={
                 "host": "10.0.0.1",
-                "metrics": {"cpu_usage": 10.0, "mem_used_mb": 512.0, "disk_free_gb": 20.0},
-                "timestamp": "2026-05-02 12:00:00"
-            },
-            headers={"X-API-Key": "test-key"}
-        )
-        self.assertEqual(response.status_code, 400)
-
-    def test_add_metric_missing_timestamp(self):
-        """POST missing timestamp field should return 400."""
-        response = self.client.post(
-            '/api/v1/metrics',
-            json={
-                "host": "10.0.0.1",
-                "ip": "10.0.0.1",
                 "metrics": {"cpu_usage": 10.0, "mem_used_mb": 512.0, "disk_free_gb": 20.0}
             },
             headers={"X-API-Key": "test-key"}
@@ -90,8 +76,7 @@ class TestAPI(unittest.TestCase):
             json={
                 "host": "10.0.0.1",
                 "ip": "10.0.0.1",
-                "metrics": {},
-                "timestamp": "2026-05-02 12:00:00"
+                "metrics": {}
             },
             headers={"X-API-Key": "test-key"}
         )
@@ -116,8 +101,7 @@ class TestAPI(unittest.TestCase):
                     "cpu_usage": 45.0,
                     "mem_used_mb": 512.0,
                     "disk_free_gb": 20.0
-                },
-                "timestamp": "2026-05-02 12:00:00"
+                }
             },
             headers={"X-API-Key": "test-key"}
         )
@@ -125,6 +109,15 @@ class TestAPI(unittest.TestCase):
         data = response.get_json()
         self.assertEqual(data['status'], 'success')
         self.assertEqual(data['host'], '10.0.0.1')
+        
+        # Verify timestamp is present and in correct format
+        self.assertIn('timestamp', data)
+        timestamp_str = data['timestamp']
+        # Parse timestamp and verify it's approximately now (within 5 seconds)
+        timestamp = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S")
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        time_diff = abs((now - timestamp).total_seconds())
+        self.assertLess(time_diff, 5, f"Timestamp {timestamp_str} differs from now by {time_diff} seconds")
 
     @patch('api.get_sql_connection')
     def test_get_metrics_no_results(self, mock_conn):
@@ -181,8 +174,7 @@ class TestAPI(unittest.TestCase):
                     "cpu_usage": 45.0,
                     "mem_used_mb": 512.0,
                     "disk_free_gb": 20.0
-                },
-                "timestamp": "2026-05-02 12:00:00"
+                }
             },
             headers={"X-API-Key": "test-key"}
         )
