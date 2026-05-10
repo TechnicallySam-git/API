@@ -76,7 +76,7 @@ def add_metric():
     cpu_usage = metrics.get('cpu_usage')
     mem_used_mb = metrics.get('mem_used_mb')
     disk_free_gb = metrics.get('disk_free_gb')
-    timestamp = data.get('timestamp')
+    timestamp = data.get("%Y-%m-%dT%H:%M:%SZ")
 
     if not host:
         return jsonify({"status": "error", "message": "Missing required field: host"}), 400
