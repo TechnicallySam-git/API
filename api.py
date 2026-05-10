@@ -64,6 +64,7 @@ def add_metric():
     Accepts a JSON POST request containing server metrics and stores them in the database.
     Requires a valid X-API-Key header.
     Expected JSON fields: host, ip, metrics (cpu_usage, mem_used_mb, disk_free_gb).
+    For production, metrics should also include: mem_total_mb, disk_total_gb.
     Timestamp is generated server-side to ensure accuracy.
     Returns 201 on success, 400 for missing fields, 401 for unauthorized, 500 for server errors.
     """
@@ -76,7 +77,9 @@ def add_metric():
     metrics = data.get('metrics', {})
     cpu_usage = metrics.get('cpu_usage')
     mem_used_mb = metrics.get('mem_used_mb')
+    mem_total_mb = metrics.get('mem_total_mb')
     disk_free_gb = metrics.get('disk_free_gb')
+    disk_total_gb = metrics.get('disk_total_gb')
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
     if not host:
@@ -87,17 +90,25 @@ def add_metric():
         return jsonify({"status": "error", "message": "Missing required field: cpu_usage"}), 400
     if mem_used_mb is None:
         return jsonify({"status": "error", "message": "Missing required field: mem_used_mb"}), 400
+    if mem_total_mb is None:
+        return jsonify({"status": "error", "message": "Missing required field: mem_total_mb (monitoring-server should estimate)"}), 400
     if disk_free_gb is None:
         return jsonify({"status": "error", "message": "Missing required field: disk_free_gb"}), 400
+    if disk_total_gb is None:
+        return jsonify({"status": "error", "message": "Missing required field: disk_total_gb (monitoring-server should estimate)"}), 400
 
     try:
         with get_sql_connection() as connection:
             cursor = connection.cursor()
             query = """
-                INSERT INTO server_metrics (host, ip, cpu_usage, mem_used_mb, disk_free_gb, timestamp)
-                VALUES (%s, %s, %s, %s, %s, %s)
+                INSERT INTO server_metrics (
+                    host, ip, cpu_usage, mem_used_mb, mem_total_mb, disk_free_gb, disk_total_gb, timestamp
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             """
-            cursor.execute(query, (host, ip, cpu_usage, mem_used_mb, disk_free_gb, timestamp))
+            cursor.execute(query, (
+                host, ip, cpu_usage, mem_used_mb, mem_total_mb, disk_free_gb, disk_total_gb, timestamp
+            ))
             connection.commit()
             return jsonify({
                 "status": "success",

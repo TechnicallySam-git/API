@@ -51,7 +51,7 @@ class TestAPI(unittest.TestCase):
             '/api/v1/metrics',
             json={
                 "ip": "10.0.0.1",
-                "metrics": {"cpu_usage": 10.0, "mem_used_mb": 512.0, "disk_free_gb": 20.0}
+                "metrics": {"cpu_usage": 10.0, "mem_used_mb": 512.0, "mem_total_mb": 1024.0, "disk_free_gb": 20.0, "disk_total_gb": 100.0}
             },
             headers={"X-API-Key": "test-key"}
         )
@@ -63,7 +63,7 @@ class TestAPI(unittest.TestCase):
             '/api/v1/metrics',
             json={
                 "host": "10.0.0.1",
-                "metrics": {"cpu_usage": 10.0, "mem_used_mb": 512.0, "disk_free_gb": 20.0}
+                "metrics": {"cpu_usage": 10.0, "mem_used_mb": 512.0, "mem_total_mb": 1024.0, "disk_free_gb": 20.0, "disk_total_gb": 100.0}
             },
             headers={"X-API-Key": "test-key"}
         )
@@ -100,7 +100,9 @@ class TestAPI(unittest.TestCase):
                 "metrics": {
                     "cpu_usage": 45.0,
                     "mem_used_mb": 512.0,
-                    "disk_free_gb": 20.0
+                    "mem_total_mb": 1024.0,
+                    "disk_free_gb": 20.0,
+                    "disk_total_gb": 100.0
                 }
             },
             headers={"X-API-Key": "test-key"}
@@ -142,7 +144,7 @@ class TestAPI(unittest.TestCase):
         mock_cursor = MagicMock()
         mock_cursor.fetchall.return_value = [
             {"id": 1, "host": "10.0.0.1", "ip": "10.0.0.1", "cpu_usage": 45.0,
-             "mem_used_mb": 512.0, "disk_free_gb": 20.0, "timestamp": "2026-05-02 12:00:00"}
+             "mem_used_mb": 512.0, "mem_total_mb": 1024.0, "disk_free_gb": 20.0, "disk_total_gb": 100.0, "timestamp": "2026-05-02 12:00:00"}
         ]
         mock_connection = MagicMock()
         mock_connection.cursor.return_value = mock_cursor
@@ -173,7 +175,9 @@ class TestAPI(unittest.TestCase):
                 "metrics": {
                     "cpu_usage": 45.0,
                     "mem_used_mb": 512.0,
-                    "disk_free_gb": 20.0
+                    "mem_total_mb": 1024.0,
+                    "disk_free_gb": 20.0,
+                    "disk_total_gb": 100.0
                 }
             },
             headers={"X-API-Key": "test-key"}
