@@ -132,44 +132,116 @@ def get_metrics():
     if not validate_api_key():
         return jsonify({"status": "error", "message": "Unauthorized. Valid X-API-Key required."}), 401
 
+    # New: support `hours` param (allowed: 1,2,6,24) or explicit from/to; default returns last 200 rows
     from_date = request.args.get('from')
     to_date = request.args.get('to')
+    hours = request.args.get('hours', type=int)
     host = request.args.get('host')
-    limit = request.args.get('limit', 100, type=int)
+    limit = request.args.get('limit', 200, type=int)
 
+    if limit <= 0:
+        limit = 200
     if limit > 1000:
         limit = 1000
+
+    allowed_hours = {1, 2, 6, 24}
+    min_required = 5
+
+    def _parse_timestamp(val):
+        if val is None:
+            return None
+        if isinstance(val, datetime):
+            dt = val
+        else:
+            try:
+                dt = datetime.fromisoformat(val)
+            except Exception:
+                try:
+                    dt = datetime.strptime(val, "%Y-%m-%d %H:%M:%S")
+                except Exception:
+                    return str(val)
+
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc).isoformat()
+        return dt.astimezone(timezone.utc).isoformat()
 
     try:
         with get_sql_connection() as connection:
             cursor = connection.cursor(as_dict=True)
 
+            # Build WHERE clauses
+            where_clauses = []
+            params = []
+
+            # If hours provided and allowed, compute from/to
+            if hours is not None:
+                if hours not in allowed_hours:
+                    return jsonify({"status": "error", "message": "Invalid hours parameter. Allowed: 1,2,6,24"}), 400
+                now = datetime.now(timezone.utc)
+                to_dt = now
+                from_dt = now - __import__('datetime').timedelta(hours=hours)
+                from_date = from_dt.strftime("%Y-%m-%d %H:%M:%S")
+                to_date = to_dt.strftime("%Y-%m-%d %H:%M:%S")
+
             if from_date and to_date:
-                query = "SELECT TOP (%s) * FROM server_metrics WHERE timestamp BETWEEN %s AND %s"
-                params = [limit, from_date, to_date]
-            else:
-                query = "SELECT TOP (%s) * FROM server_metrics"
-                params = [limit]
+                where_clauses.append("timestamp BETWEEN %s AND %s")
+                params.extend([from_date, to_date])
 
             if host:
-                if from_date and to_date:
-                    query += " AND host = %s"
-                else:
-                    query += " WHERE host = %s"
+                where_clauses.append("host = %s")
                 params.append(host)
 
-            query += " ORDER BY timestamp DESC"
-            cursor.execute(query, params)
+            where_sql = ""
+            if where_clauses:
+                where_sql = " WHERE " + " AND ".join(where_clauses)
+
+            order_sql = " ORDER BY timestamp DESC"
+            # Use OFFSET-FETCH to limit results (parameterized)
+            limit_sql = " OFFSET 0 ROWS FETCH NEXT %s ROWS ONLY"
+
+            query = "SELECT * FROM server_metrics" + where_sql + order_sql + limit_sql
+
+            exec_params = list(params)
+            exec_params.append(limit)
+
+            cursor.execute(query, exec_params)
             results = cursor.fetchall()
+
+            # If a time-filter was requested but returned too few rows, fall back to latest rows
+            warning = None
+            if (from_date and to_date) and len(results) < min_required:
+                # fallback: latest rows (keep host filter if present)
+                warning = "Not enough data for requested time range; returning latest rows instead."
+                where_clauses = []
+                params = []
+                if host:
+                    where_clauses.append("host = %s")
+                    params.append(host)
+                where_sql = ""
+                if where_clauses:
+                    where_sql = " WHERE " + " AND ".join(where_clauses)
+                query = "SELECT * FROM server_metrics" + where_sql + order_sql + limit_sql
+                exec_params = list(params)
+                exec_params.append(limit)
+                cursor.execute(query, exec_params)
+                results = cursor.fetchall()
 
             if not results:
                 return jsonify({"status": "error", "message": "No records match the filter."}), 404
 
-            return jsonify({
-                "status": "success",
-                "count": len(results),
-                "results": results
-            }), 200
+            # Normalize results for dashboard consumption
+            normalized = []
+            for row in results:
+                entry = row if isinstance(row, dict) else dict(row)
+                if 'timestamp' in entry:
+                    entry['timestamp'] = _parse_timestamp(entry['timestamp'])
+                normalized.append(entry)
+
+            resp = {"status": "success", "count": len(normalized), "results": normalized}
+            if warning:
+                resp['warning'] = warning
+
+            return jsonify(resp), 200
 
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
